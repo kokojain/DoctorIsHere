@@ -11,14 +11,25 @@ import {
   View,
 } from 'react-native';
 
+import { PuckScanner } from '@/components/puck-scanner';
 import { useAuth } from '@/lib/auth-context';
 import { useBeacon } from '@/lib/beacon-context';
-import { fetchMyPlaces, registerPlace, removePlace } from '@/lib/presence-api';
+import {
+  fetchMyPlaces,
+  registerPlace,
+  removePlace,
+  replacePlaceBeacon,
+} from '@/lib/presence-api';
+import type { PuckIdentity } from '@/lib/qr';
 import { BEACON_UUID } from '@/lib/supabase';
-import { palette, formatTime } from '@/lib/ui';
+import { palette, cardShadow, formatTime } from '@/lib/ui';
 
 /** A beacon heard within this window counts as "here right now". */
 const HEARD_NOW_MS = 20_000;
+
+type ScanTarget =
+  | { mode: 'add' }
+  | { mode: 'replace'; locationId: string; locationName: string };
 
 export default function MyPlacesScreen() {
   const { doctor } = useAuth();
@@ -26,33 +37,52 @@ export default function MyPlacesScreen() {
   const queryClient = useQueryClient();
   const [placeName, setPlaceName] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
+  const [scannedPuck, setScannedPuck] = useState<PuckIdentity | null>(null);
 
   const placesQuery = useQuery({
     queryKey: ['my-places', doctor?.id],
     queryFn: () => fetchMyPlaces(doctor!.id),
     enabled: !!doctor,
-    refetchInterval: 15_000, // keeps "last heard" fresh
+    refetchInterval: 15_000,
   });
 
+  function invalidatePlaces() {
+    queryClient.invalidateQueries({ queryKey: ['my-places'] });
+    queryClient.invalidateQueries({ queryKey: ['my-locations'] });
+    queryClient.invalidateQueries({ queryKey: ['my-presence'] });
+  }
+
   const registerMutation = useMutation({
-    mutationFn: ({ major, minor, name }: { major: number; minor: number; name: string }) =>
-      registerPlace({ uuid: BEACON_UUID, major, minor }, name),
+    mutationFn: ({ puck, name }: { puck: PuckIdentity; name: string }) =>
+      registerPlace(puck, name),
     onSuccess: () => {
       setPlaceName('');
+      setScannedPuck(null);
       setFormError(null);
-      queryClient.invalidateQueries({ queryKey: ['my-places'] });
-      queryClient.invalidateQueries({ queryKey: ['my-locations'] });
+      invalidatePlaces();
     },
     onError: (error: Error) => setFormError(error.message),
   });
 
+  const replaceMutation = useMutation({
+    mutationFn: ({ locationId, puck }: { locationId: string; puck: PuckIdentity }) =>
+      replacePlaceBeacon(locationId, puck),
+    onSuccess: (result) => {
+      invalidatePlaces();
+      Alert.alert(
+        'Puck replaced',
+        result.unchanged
+          ? 'That puck is already attached to this place.'
+          : 'The new puck is active. The old one has been retired and can no longer be used.'
+      );
+    },
+    onError: (error: Error) => Alert.alert('Couldn’t replace puck', error.message),
+  });
+
   const removeMutation = useMutation({
     mutationFn: (locationId: string) => removePlace(locationId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['my-places'] });
-      queryClient.invalidateQueries({ queryKey: ['my-locations'] });
-      queryClient.invalidateQueries({ queryKey: ['my-presence'] });
-    },
+    onSuccess: invalidatePlaces,
   });
 
   if (!doctor || placesQuery.isLoading) {
@@ -66,27 +96,62 @@ export default function MyPlacesScreen() {
   const heardNow =
     beacon.lastSeen && Date.now() - beacon.lastSeen.at < HEARD_NOW_MS ? beacon.lastSeen : null;
 
+  // A puck pending registration: scanned QR wins; otherwise the nearest one heard.
+  const pendingPuck: (PuckIdentity & { via: 'scan' | 'radio' }) | null = scannedPuck
+    ? { ...scannedPuck, via: 'scan' }
+    : heardNow
+      ? { uuid: BEACON_UUID.toLowerCase(), major: heardNow.major, minor: heardNow.minor, via: 'radio' }
+      : null;
+
+  function handleScanned(puck: PuckIdentity) {
+    const target = scanTarget;
+    setScanTarget(null);
+    if (!target) return;
+    if (target.mode === 'add') {
+      setScannedPuck(puck);
+      setFormError(null);
+      return;
+    }
+    Alert.alert(
+      'Replace puck',
+      `Attach the scanned puck (#${puck.major}-${puck.minor}) to “${target.locationName}”?\n\nThe current puck will be retired permanently and cannot be reused.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Replace',
+          style: 'destructive',
+          onPress: () => replaceMutation.mutate({ locationId: target.locationId, puck }),
+        },
+      ]
+    );
+  }
+
   function confirmRemove(locationId: string, name: string) {
-    Alert.alert('Remove place', `Remove "${name}" and free its beacon?`, [
+    Alert.alert('Remove place', `Remove “${name}” and free its puck?`, [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => removeMutation.mutate(locationId),
-      },
+      { text: 'Remove', style: 'destructive', onPress: () => removeMutation.mutate(locationId) },
     ]);
   }
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      {/* Add a place — provisioning flow (PLAN.md §1) */}
+      {/* Add a place */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Add a place</Text>
-        {heardNow ? (
+
+        {pendingPuck ? (
           <>
-            <Text style={styles.detected}>
-              Beacon detected — major {heardNow.major} / minor {heardNow.minor}
-            </Text>
+            <View style={styles.puckRow}>
+              <Text style={styles.detected}>
+                Puck #{pendingPuck.major}-{pendingPuck.minor}{' '}
+                {pendingPuck.via === 'scan' ? 'scanned' : 'detected nearby'}
+              </Text>
+              {pendingPuck.via === 'scan' && (
+                <Pressable onPress={() => setScannedPuck(null)} hitSlop={8}>
+                  <Text style={styles.clearScan}>clear</Text>
+                </Pressable>
+              )}
+            </View>
             <TextInput
               style={styles.input}
               placeholder='Name this place (e.g. "Sunrise Clinic, Room 2")'
@@ -100,24 +165,30 @@ export default function MyPlacesScreen() {
               disabled={!placeName.trim() || registerMutation.isPending}
               onPress={() =>
                 registerMutation.mutate({
-                  major: heardNow.major,
-                  minor: heardNow.minor,
+                  puck: { uuid: pendingPuck.uuid, major: pendingPuck.major, minor: pendingPuck.minor },
                   name: placeName,
                 })
               }>
               {registerMutation.isPending ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.primaryButtonLabel}>Register this beacon</Text>
+                <Text style={styles.primaryButtonLabel}>Register this puck</Text>
               )}
             </Pressable>
           </>
         ) : (
-          <Text style={styles.cardLine}>
-            {beacon.available
-              ? 'Stand near the new beacon — it will appear here when your phone hears it.'
-              : 'Beacon detection needs the dev build on a physical iPhone.'}
-          </Text>
+          <>
+            <Pressable
+              style={styles.primaryButton}
+              onPress={() => setScanTarget({ mode: 'add' })}>
+              <Text style={styles.primaryButtonLabel}>⌞⌝  Scan puck code</Text>
+            </Pressable>
+            <Text style={styles.cardLine}>
+              {beacon.available
+                ? 'Scan the QR code on the new puck — or just stand near it and it will appear here.'
+                : 'Scan the QR code printed on the new puck.'}
+            </Text>
+          </>
         )}
       </View>
 
@@ -134,21 +205,48 @@ export default function MyPlacesScreen() {
                 <Text style={styles.cardLine}>
                   {place.beacon
                     ? place.beacon.last_seen_at
-                      ? `Beacon last heard ${formatTime(place.beacon.last_seen_at)}`
-                      : 'Beacon registered — not heard yet'
-                    : 'No beacon attached'}
+                      ? `Puck active · last heard ${formatTime(place.beacon.last_seen_at)}`
+                      : 'Puck registered — not heard yet'
+                    : 'No puck attached'}
                 </Text>
+                <View style={styles.placeActions}>
+                  <Pressable
+                    style={styles.replaceButton}
+                    disabled={replaceMutation.isPending}
+                    onPress={() =>
+                      setScanTarget({
+                        mode: 'replace',
+                        locationId: place.id,
+                        locationName: place.name,
+                      })
+                    }>
+                    <Text style={styles.replaceButtonLabel}>
+                      {place.beacon ? '⌞⌝  Replace puck' : '⌞⌝  Attach puck'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    hitSlop={8}
+                    disabled={removeMutation.isPending}
+                    onPress={() => confirmRemove(place.id, place.name)}>
+                    <Text style={styles.remove}>Remove place</Text>
+                  </Pressable>
+                </View>
               </View>
-              <Pressable
-                hitSlop={8}
-                disabled={removeMutation.isPending}
-                onPress={() => confirmRemove(place.id, place.name)}>
-                <Text style={styles.remove}>Remove</Text>
-              </Pressable>
             </View>
           ))
         )}
       </View>
+
+      <PuckScanner
+        visible={scanTarget != null}
+        title={
+          scanTarget?.mode === 'replace'
+            ? `Scan the new puck for ${scanTarget.locationName}`
+            : 'Scan the new puck’s QR code'
+        }
+        onScanned={handleScanned}
+        onClose={() => setScanTarget(null)}
+      />
     </ScrollView>
   );
 }
@@ -159,15 +257,16 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: {
     backgroundColor: palette.card,
-    borderRadius: 16,
-    padding: 16,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: palette.border,
+    borderRadius: 20,
+    padding: 18,
+    gap: 12,
+    ...cardShadow,
   },
   cardTitle: { fontSize: 15, fontWeight: '700', color: palette.text },
-  cardLine: { fontSize: 13, color: palette.textMuted },
+  cardLine: { fontSize: 13, color: palette.textMuted, lineHeight: 19 },
+  puckRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   detected: { fontSize: 14, fontWeight: '600', color: palette.present },
+  clearScan: { fontSize: 13, color: palette.textMuted, textDecorationLine: 'underline' },
   input: {
     borderWidth: 1,
     borderColor: palette.border,
@@ -181,14 +280,23 @@ const styles = StyleSheet.create({
   error: { color: palette.danger, fontSize: 13 },
   primaryButton: {
     backgroundColor: palette.primary,
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: 12,
+    paddingVertical: 13,
     alignItems: 'center',
   },
   buttonDisabled: { opacity: 0.5 },
   primaryButtonLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  placeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  placeText: { flex: 1, gap: 2 },
+  placeRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  placeText: { flex: 1, gap: 4 },
   placeName: { fontSize: 16, fontWeight: '600', color: palette.text },
+  placeActions: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 6 },
+  replaceButton: {
+    borderWidth: 1,
+    borderColor: palette.primary,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  replaceButtonLabel: { fontSize: 13, fontWeight: '600', color: palette.primary },
   remove: { color: palette.danger, fontSize: 13, fontWeight: '600' },
 });

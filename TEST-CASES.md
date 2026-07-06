@@ -130,6 +130,16 @@ Prefixes: **AU** auth (both apps) · **BD** backend dashboard · **DA** doctor a
 | DA-23 | Replace beacon | Register a fresh valid puck via "Replace beacon" on the location | Old identity retired; location auto-updates again; followers optionally get "back online" |
 | DA-24 | Schedule editor | Create weekly schedule Mon/Wed 9–1 | Persists; renders on doctor detail in patient app |
 
+### 3.5 Puck QR scanning & replacement
+
+| ID | Case | Steps | Expected |
+|---|---|---|---|
+| DA-25 | Add place via QR scan | My Places → Scan puck code → scan a valid unregistered puck's QR → name → register | Place created with that puck; identical result to radio-detect provisioning |
+| DA-26 | Foreign QR rejected | Scan a random QR (URL, Wi-Fi code) | "Not a DoctorIsHere puck code" hint; scanner stays open |
+| DA-27 | Replace puck | Place → Replace puck → scan a valid new puck → confirm | Old identity `retired=true` in catalog (its sightings rejected from then on — DA-22 behavior); new puck attached; open presence at the place unaffected |
+| DA-28 | Replace-puck guards | (a) scan an expired/retired puck (b) scan a puck attached to another place (c) scan the place's own current puck | (a) "expired" error (b) "already registered" error (c) friendly no-op "already attached" |
+| DA-29 | Camera permission denied | Deny camera on first scan | Explanatory screen with an Allow button; no crash; radio-detect provisioning still available |
+
 ---
 
 ## 4. PA — Patient app

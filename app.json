@@ -52,7 +52,13 @@
         }
       ],
       "expo-notifications",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "DoctorIsHere uses the camera to scan the QR code printed on a presence puck."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

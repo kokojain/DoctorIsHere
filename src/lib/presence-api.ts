@@ -99,6 +99,19 @@ export async function removePlace(locationId: string) {
   if (data?.error) throw new Error(RPC_ERRORS[data.error] ?? data.error);
 }
 
+/** Attach a freshly scanned puck to an existing place; the old puck is retired. */
+export async function replacePlaceBeacon(locationId: string, beacon: BeaconSighting) {
+  const { data, error } = await supabase.rpc('replace_place_beacon', {
+    p_location_id: locationId,
+    p_uuid: beacon.uuid,
+    p_major: beacon.major,
+    p_minor: beacon.minor,
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(RPC_ERRORS[data.error] ?? data.error);
+  return data as { ok: true; unchanged?: boolean; retired_old?: boolean };
+}
+
 export async function setExpectedUntil(presenceId: string, minutes: number | null) {
   const expected_until =
     minutes == null ? null : new Date(Date.now() + minutes * 60_000).toISOString();

@@ -68,7 +68,22 @@ Each puck has an **expiry date**; when it lapses the doctor must **buy a new puc
 
 ### Provisioning flow in-app
 
-Doctor taps "Add a place" → app scans for the nearest new puck → validates it against the catalog (unregistered, unexpired) → doctor names it ("Sunrise Clinic, Room 2") and optionally attaches an address → beacon is registered to that doctor+location in the backend.
+Doctor taps "Add a place" → identifies the puck by **scanning the QR code printed on it** (or by standing near it — radio detection) → app validates it against the catalog (unregistered, unexpired) → doctor names it ("Sunrise Clinic, Room 2") → beacon is registered to that doctor+location in the backend.
+
+### Puck QR codes & the replacement process
+
+Every puck ships with a **2D (QR) code printed on it** by the provisioning tool, encoding its catalog identity: `DIH1:<uuid>:<major>:<minor>`. Scanning is the doctor's universal "which puck do I mean" gesture — it needs no radio contact, so it works for a puck still in its box.
+
+**Replace-puck flow (per place, any time):**
+1. My Places → the place's **"Replace puck"** button → camera opens with a scan frame.
+2. Doctor scans the new puck's QR. Non-DoctorIsHere codes are rejected on the spot; catalog validation then rejects expired, retired, or already-registered pucks with a plain-language reason.
+3. Confirmation states the consequence explicitly: *"Attach the scanned puck to 'Sunrise Clinic'? The current puck will be retired permanently and cannot be reused."*
+4. On confirm, atomically (server-side `replace_place_beacon`): the old registration is deleted, the old identity is marked `retired` in `beacon_catalog` — **burned forever**, so a lost/stolen/expired puck can never report presence again — and the new puck is attached to the place. Scanning the puck already attached to that place is a friendly no-op.
+5. Any open presence at the place is untouched (the place didn't change, only its radio). The place card shows "Puck registered — not heard yet" until the new puck's first sighting confirms it live.
+
+**Why retire rather than free:** replacement exists for expiry, damage, and loss. Freeing the old identity would let whoever holds the old puck keep driving the doctor's presence. Retirement is what makes the expiry business model enforceable (§ Beacon expiry).
+
+**Demo aid:** `node scripts/generate-puck-qr.mjs` renders `puck-qr.html` with scannable codes for the five demo identities — in production these are printed labels on the physical pucks.
 
 ### Platform realities (drives the tech choices below)
 
