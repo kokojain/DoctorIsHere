@@ -14,7 +14,10 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "DoctorIsHere uses your location to detect the clinic beacon and update your presence automatically.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow 'Always' so your presence updates even when the app is in the background.",
-        "UIBackgroundModes": ["location", "remote-notification"]
+        "UIBackgroundModes": [
+          "location",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -48,7 +51,8 @@
           "isIosBackgroundLocationEnabled": true
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

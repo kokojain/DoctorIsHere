@@ -1,7 +1,9 @@
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { DurationDial } from './duration-dial';
 import { palette, cardShadow, formatDuration, formatTime } from '@/lib/ui';
 
 const PRESETS = [
@@ -32,19 +34,36 @@ export function DurationSheet({
     if (visible) setMinutes(initialMinutes);
   }, [visible, initialMinutes]);
 
-  const until = new Date(Date.now() + minutes * 60_000).toISOString();
+  const until = new Date(Date.now() + minutes * 60_000);
+
+  // The wheel picks a wall-clock departure time; interpret it as the next
+  // occurrence of that time (a pick "earlier than now" wraps to tomorrow).
+  function onPickerChange(_event: DateTimePickerEvent, date?: Date) {
+    if (!date) return;
+    const now = new Date();
+    const picked = new Date(now);
+    picked.setHours(date.getHours(), date.getMinutes(), 0, 0);
+    let diff = Math.round((picked.getTime() - now.getTime()) / 60_000);
+    if (diff <= 0) diff += 24 * 60;
+    setMinutes(diff);
+  }
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={styles.sheet}>
         <View style={styles.grabber} />
-        <Text style={styles.title}>How long will you be at</Text>
-        <Text style={styles.location}>{locationName}?</Text>
+        <Text style={styles.title}>I’ll be at {locationName} until…</Text>
 
-        <DurationDial minutes={minutes} onChange={setMinutes} />
+        <DateTimePicker
+          value={until}
+          mode="time"
+          display="spinner"
+          minuteInterval={5}
+          onChange={onPickerChange}
+          style={styles.picker}
+        />
 
-        <Text style={styles.until}>Until {formatTime(until)}</Text>
         <Text style={styles.duration}>{formatDuration(minutes)} from now</Text>
 
         <View style={styles.presets}>
@@ -65,7 +84,9 @@ export function DurationSheet({
         </View>
 
         <Pressable style={styles.confirm} onPress={() => onConfirm(minutes)}>
-          <Text style={styles.confirmLabel}>Set — leaving around {formatTime(until)}</Text>
+          <Text style={styles.confirmLabel}>
+            Set — leaving around {formatTime(until.toISOString())}
+          </Text>
         </Pressable>
         <Pressable onPress={onSkip} hitSlop={8}>
           <Text style={styles.skip}>No timer — I’ll leave when I leave</Text>
@@ -98,11 +119,10 @@ const styles = StyleSheet.create({
     backgroundColor: palette.border,
     marginBottom: 12,
   },
-  title: { fontSize: 16, color: palette.textMuted },
-  location: { fontSize: 22, fontWeight: '700', color: palette.text, marginBottom: 14 },
-  until: { fontSize: 24, fontWeight: '700', color: palette.text, marginTop: 14 },
-  duration: { fontSize: 14, color: palette.textMuted },
-  presets: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  title: { fontSize: 19, fontWeight: '700', color: palette.text, textAlign: 'center' },
+  picker: { alignSelf: 'stretch', height: 190 },
+  duration: { fontSize: 15, fontWeight: '600', color: palette.textMuted },
+  presets: { flexDirection: 'row', gap: 8, marginTop: 10 },
   preset: {
     borderWidth: 1,
     borderColor: palette.border,
@@ -119,7 +139,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 14,
   },
   confirmLabel: { color: '#fff', fontSize: 16, fontWeight: '700' },
   skip: { color: palette.textMuted, fontSize: 14, marginTop: 12 },
