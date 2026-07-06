@@ -15,6 +15,7 @@ import { PuckScanner } from '@/components/puck-scanner';
 import { useAuth } from '@/lib/auth-context';
 import { useBeacon } from '@/lib/beacon-context';
 import {
+  addPlace,
   fetchMyPlaces,
   registerPlace,
   removePlace,
@@ -54,8 +55,8 @@ export default function MyPlacesScreen() {
   }
 
   const registerMutation = useMutation({
-    mutationFn: ({ puck, name }: { puck: PuckIdentity; name: string }) =>
-      registerPlace(puck, name),
+    mutationFn: ({ puck, name }: { puck: PuckIdentity | null; name: string }) =>
+      puck ? registerPlace(puck, name) : addPlace(name),
     onSuccess: () => {
       setPlaceName('');
       setScannedPuck(null);
@@ -139,57 +140,59 @@ export default function MyPlacesScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Add a place</Text>
 
+        <TextInput
+          style={styles.input}
+          placeholder='Name this place (e.g. "Sunrise Clinic, Room 2")'
+          placeholderTextColor={palette.textMuted}
+          value={placeName}
+          onChangeText={setPlaceName}
+        />
+
         {pendingPuck ? (
-          <>
-            <View style={styles.puckRow}>
-              <Text style={styles.detected}>
-                Puck #{pendingPuck.major}-{pendingPuck.minor}{' '}
-                {pendingPuck.via === 'scan' ? 'scanned' : 'detected nearby'}
-              </Text>
-              {pendingPuck.via === 'scan' && (
-                <Pressable onPress={() => setScannedPuck(null)} hitSlop={8}>
-                  <Text style={styles.clearScan}>clear</Text>
-                </Pressable>
-              )}
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder='Name this place (e.g. "Sunrise Clinic, Room 2")'
-              placeholderTextColor={palette.textMuted}
-              value={placeName}
-              onChangeText={setPlaceName}
-            />
-            {formError ? <Text style={styles.error}>{formError}</Text> : null}
-            <Pressable
-              style={[styles.primaryButton, !placeName.trim() && styles.buttonDisabled]}
-              disabled={!placeName.trim() || registerMutation.isPending}
-              onPress={() =>
-                registerMutation.mutate({
-                  puck: { uuid: pendingPuck.uuid, major: pendingPuck.major, minor: pendingPuck.minor },
-                  name: placeName,
-                })
-              }>
-              {registerMutation.isPending ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryButtonLabel}>Register this puck</Text>
-              )}
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <Pressable
-              style={styles.primaryButton}
-              onPress={() => setScanTarget({ mode: 'add' })}>
-              <Text style={styles.primaryButtonLabel}>⌞⌝  Scan puck code</Text>
-            </Pressable>
-            <Text style={styles.cardLine}>
-              {beacon.available
-                ? 'Scan the QR code on the new puck — or just stand near it and it will appear here.'
-                : 'Scan the QR code printed on the new puck.'}
+          <View style={styles.puckRow}>
+            <Text style={styles.detected}>
+              Puck #{pendingPuck.major}-{pendingPuck.minor}{' '}
+              {pendingPuck.via === 'scan' ? 'scanned' : 'detected nearby'} — will be attached
             </Text>
-          </>
+            {pendingPuck.via === 'scan' && (
+              <Pressable onPress={() => setScannedPuck(null)} hitSlop={8}>
+                <Text style={styles.clearScan}>clear</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : (
+          <Pressable style={styles.scanButton} onPress={() => setScanTarget({ mode: 'add' })}>
+            <Text style={styles.scanButtonLabel}>⌞⌝  Scan puck code (optional)</Text>
+          </Pressable>
         )}
+
+        {formError ? <Text style={styles.error}>{formError}</Text> : null}
+
+        <Pressable
+          style={[styles.primaryButton, !placeName.trim() && styles.buttonDisabled]}
+          disabled={!placeName.trim() || registerMutation.isPending}
+          onPress={() =>
+            registerMutation.mutate({
+              puck: pendingPuck
+                ? { uuid: pendingPuck.uuid, major: pendingPuck.major, minor: pendingPuck.minor }
+                : null,
+              name: placeName,
+            })
+          }>
+          {registerMutation.isPending ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.primaryButtonLabel}>
+              {pendingPuck ? 'Add place with this puck' : 'Add place'}
+            </Text>
+          )}
+        </Pressable>
+
+        <Text style={styles.cardLine}>
+          {pendingPuck
+            ? null
+            : 'No puck yet? Add the place now and attach a puck later from its card below.'}
+        </Text>
       </View>
 
       {/* Registered places */}
@@ -284,6 +287,14 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     alignItems: 'center',
   },
+  scanButton: {
+    borderWidth: 1,
+    borderColor: palette.primary,
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  scanButtonLabel: { color: palette.primary, fontSize: 15, fontWeight: '600' },
   buttonDisabled: { opacity: 0.5 },
   primaryButtonLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
   placeRow: { flexDirection: 'row', alignItems: 'flex-start' },

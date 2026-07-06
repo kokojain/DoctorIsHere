@@ -80,6 +80,17 @@ const RPC_ERRORS: Record<string, string> = {
   not_found: 'Place not found.',
 };
 
+/** Create a place with no puck yet — one can be scanned and attached later. */
+export async function addPlace(name: string, address?: string) {
+  const { data, error } = await supabase.rpc('add_place', {
+    p_name: name,
+    p_address: address ?? null,
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(RPC_ERRORS[data.error] ?? data.error);
+  return data as { ok: true; location_id: string };
+}
+
 export async function registerPlace(beacon: BeaconSighting, name: string, address?: string) {
   const { data, error } = await supabase.rpc('register_place', {
     p_uuid: beacon.uuid,
