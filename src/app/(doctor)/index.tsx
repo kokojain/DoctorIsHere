@@ -2,14 +2,18 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DurationSheet } from '@/components/duration-sheet';
 import { useAuth } from '@/lib/auth-context';
+import { useBeacon } from '@/lib/beacon-context';
 import {
   clearMyPresence,
   fetchMyLocations,
@@ -18,20 +22,15 @@ import {
   setExpectedUntil,
   subscribeToPresence,
 } from '@/lib/presence-api';
-import { useBeacon } from '@/lib/beacon-context';
-import { palette, formatTime } from '@/lib/ui';
-
-const DURATION_CHOICES = [
-  { label: '30 min', minutes: 30 },
-  { label: '1 hour', minutes: 60 },
-  { label: '2 hours', minutes: 120 },
-];
+import { palette, cardShadow, formatTime, greeting } from '@/lib/ui';
 
 export default function MyPresenceScreen() {
-  const { doctor } = useAuth();
+  const { doctor, profile } = useAuth();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const beacon = useBeacon();
   const [dismissedPromptFor, setDismissedPromptFor] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const presenceQuery = useQuery({
@@ -52,6 +51,19 @@ export default function MyPresenceScreen() {
     return unsubscribe;
   }, [queryClient]);
 
+  const presence = presenceQuery.data ?? null;
+
+  // A fresh beacon arrival with no timer → offer the clock once.
+  const needsPrompt =
+    presence != null &&
+    presence.source === 'beacon' &&
+    presence.expected_until == null &&
+    dismissedPromptFor !== presence.id;
+
+  useEffect(() => {
+    if (needsPrompt) setSheetOpen(true);
+  }, [needsPrompt]);
+
   if (!doctor || presenceQuery.isLoading) {
     return (
       <View style={styles.center}>
@@ -59,13 +71,6 @@ export default function MyPresenceScreen() {
       </View>
     );
   }
-
-  const presence = presenceQuery.data ?? null;
-  const showDurationPrompt =
-    presence != null &&
-    presence.source === 'beacon' &&
-    presence.expected_until == null &&
-    dismissedPromptFor !== presence.id;
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -77,148 +82,177 @@ export default function MyPresenceScreen() {
     }
   }
 
+  const permissionProblem =
+    beacon.available && (beacon.authorization === 'denied' || beacon.authorization === 'restricted');
+
+  const firstName = profile?.full_name?.split(' ').slice(-1)[0] ?? '';
+
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      {/* Status card */}
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 20 }]}>
+      {/* Greeting */}
+      <View>
+        <Text style={styles.greeting}>{greeting()},</Text>
+        <Text style={styles.name}>{profile?.full_name}</Text>
+      </View>
+
+      {/* Only surfaced when something actually needs the doctor's attention */}
+      {permissionProblem && (
+        <Pressable style={styles.banner} onPress={() => Linking.openSettings()}>
+          <Text style={styles.bannerText}>
+            Location permission is off, so automatic check-in can’t work. Tap to open
+            Settings.
+          </Text>
+        </Pressable>
+      )}
+
+      {/* Hero status */}
       <View
         style={[
-          styles.statusCard,
-          { backgroundColor: presence ? palette.presentBg : palette.awayBg },
+          styles.hero,
+          presence ? styles.heroPresent : styles.heroAway,
         ]}>
-        <Text style={[styles.statusLabel, { color: presence ? palette.present : palette.away }]}>
-          {presence ? 'PRESENT' : 'AWAY'}
+        <View style={[styles.statusDot, { backgroundColor: presence ? palette.present : palette.away }]} />
+        <Text style={[styles.heroStatus, { color: presence ? palette.present : palette.away }]}>
+          {presence ? 'Checked in' : 'Not checked in'}
         </Text>
         {presence ? (
           <>
-            <Text style={styles.statusLocation}>{presence.location_name ?? 'Unknown place'}</Text>
-            <Text style={styles.statusMeta}>
+            <Text style={styles.heroLocation}>{presence.location_name ?? 'Unknown place'}</Text>
+            <Text style={styles.heroMeta}>
               since {formatTime(presence.started_at)}
-              {presence.expected_until ? ` · until ~${formatTime(presence.expected_until)}` : ''}
-              {presence.source === 'beacon' ? ' · via beacon' : ' · manual'}
+              {presence.expected_until ? `  ·  until ~${formatTime(presence.expected_until)}` : ''}
             </Text>
+            <View style={styles.heroActions}>
+              <Pressable
+                style={styles.heroButton}
+                disabled={busy}
+                onPress={() => setSheetOpen(true)}>
+                <Text style={styles.heroButtonLabel}>
+                  {presence.expected_until ? 'Change time' : 'Set leave time'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.heroButton, styles.heroButtonQuiet]}
+                disabled={busy}
+                onPress={() => run(() => clearMyPresence(doctor.id))}>
+                <Text style={[styles.heroButtonLabel, { color: palette.danger }]}>Check out</Text>
+              </Pressable>
+            </View>
           </>
         ) : (
-          <Text style={styles.statusMeta}>
-            Walk near one of your beacons to check in automatically.
+          <Text style={styles.heroHint}>
+            {beacon.available
+              ? 'Walk into one of your places and you’ll be checked in automatically.'
+              : 'You’ll be checked in automatically when your phone hears a clinic beacon.'}
           </Text>
         )}
       </View>
 
-      {/* Duration prompt — the "how long will you be here?" moment */}
-      {showDurationPrompt && (
-        <View style={styles.promptCard}>
-          <Text style={styles.promptTitle}>How long will you be here?</Text>
-          <View style={styles.promptRow}>
-            {DURATION_CHOICES.map((choice) => (
-              <Pressable
-                key={choice.minutes}
-                style={styles.promptButton}
-                disabled={busy}
-                onPress={() => run(() => setExpectedUntil(presence!.id, choice.minutes))}>
-                <Text style={styles.promptButtonLabel}>{choice.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Pressable onPress={() => setDismissedPromptFor(presence!.id)}>
-            <Text style={styles.promptDismiss}>No timer — I&apos;ll leave when I leave</Text>
-          </Pressable>
+      {/* Manual check-in */}
+      {!presence && (locationsQuery.data ?? []).length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Check in manually</Text>
+          {(locationsQuery.data ?? []).map((location) => (
+            <Pressable
+              key={location.id}
+              style={styles.locationButton}
+              disabled={busy}
+              onPress={() => run(() => manualCheckIn(doctor.id, location.id))}>
+              <Text style={styles.locationButtonLabel}>{location.name}</Text>
+              <Text style={styles.locationButtonChevron}>›</Text>
+            </Pressable>
+          ))}
         </View>
       )}
 
-      {/* Beacon diagnostics */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Beacon</Text>
-        <Text style={styles.cardLine}>
-          Detection: {beacon.available ? 'active' : 'unavailable (dev build required)'}
-        </Text>
-        <Text style={styles.cardLine}>Location permission: {beacon.authorization}</Text>
-        <Text style={styles.cardLine}>
-          Last heard:{' '}
-          {beacon.lastSeen
-            ? `major ${beacon.lastSeen.major} / minor ${beacon.lastSeen.minor} at ${formatTime(
-                new Date(beacon.lastSeen.at).toISOString()
-              )}`
-            : 'nothing yet'}
-        </Text>
-      </View>
-
-      {/* Manual fallback — demo safety valve */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Manual override</Text>
-        {(locationsQuery.data ?? []).map((location) => (
-          <Pressable
-            key={location.id}
-            style={styles.manualButton}
-            disabled={busy}
-            onPress={() => run(() => manualCheckIn(doctor.id, location.id))}>
-            <Text style={styles.manualButtonLabel}>Check in at {location.name}</Text>
-          </Pressable>
-        ))}
-        {presence && (
-          <Pressable
-            style={[styles.manualButton, styles.clearButton]}
-            disabled={busy}
-            onPress={() => {
-              run(() => clearMyPresence(doctor.id));
-            }}>
-            <Text style={[styles.manualButtonLabel, { color: palette.danger }]}>
-              Clear my status
-            </Text>
-          </Pressable>
-        )}
-      </View>
+      {/* The clock */}
+      <DurationSheet
+        visible={sheetOpen && presence != null}
+        locationName={presence?.location_name ?? 'this location'}
+        initialMinutes={60}
+        onConfirm={(minutes) => {
+          setSheetOpen(false);
+          if (presence) run(() => setExpectedUntil(presence.id, minutes));
+        }}
+        onSkip={() => {
+          setSheetOpen(false);
+          if (presence) setDismissedPromptFor(presence.id);
+        }}
+        onClose={() => {
+          setSheetOpen(false);
+          if (presence && presence.expected_until == null) setDismissedPromptFor(presence.id);
+        }}
+      />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.background },
-  content: { padding: 16, gap: 16 },
+  content: { padding: 20, gap: 20, paddingBottom: 40 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  statusCard: {
-    borderRadius: 16,
-    padding: 24,
+  greeting: { fontSize: 16, color: palette.textMuted },
+  name: { fontSize: 26, fontWeight: '800', color: palette.text },
+  banner: {
+    backgroundColor: palette.unconfirmedBg,
+    borderRadius: 14,
+    padding: 14,
+  },
+  bannerText: { color: palette.unconfirmed, fontSize: 14, fontWeight: '500' },
+  hero: {
+    borderRadius: 24,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
     alignItems: 'center',
     gap: 6,
-  },
-  statusLabel: { fontSize: 14, fontWeight: '800', letterSpacing: 2 },
-  statusLocation: { fontSize: 24, fontWeight: '700', color: palette.text },
-  statusMeta: { fontSize: 14, color: palette.textMuted, textAlign: 'center' },
-  promptCard: {
     backgroundColor: palette.card,
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-    borderWidth: 2,
-    borderColor: palette.primary,
+    ...cardShadow,
   },
-  promptTitle: { fontSize: 17, fontWeight: '700', color: palette.text, textAlign: 'center' },
-  promptRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
-  promptButton: {
+  heroPresent: { backgroundColor: palette.presentBg },
+  heroAway: { backgroundColor: palette.card },
+  statusDot: { width: 12, height: 12, borderRadius: 6, marginBottom: 2 },
+  heroStatus: { fontSize: 13, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
+  heroLocation: { fontSize: 28, fontWeight: '800', color: palette.text, textAlign: 'center' },
+  heroMeta: { fontSize: 15, color: palette.textMuted },
+  heroHint: {
+    fontSize: 15,
+    color: palette.textMuted,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginTop: 4,
+  },
+  heroActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  heroButton: {
     backgroundColor: palette.primary,
-    borderRadius: 10,
+    borderRadius: 999,
     paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  heroButtonQuiet: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: palette.danger,
+  },
+  heroButtonLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  section: {
+    backgroundColor: palette.card,
+    borderRadius: 20,
+    padding: 18,
+    gap: 10,
+    ...cardShadow,
+  },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: palette.text, marginBottom: 2 },
+  locationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: palette.background,
+    borderRadius: 12,
+    paddingVertical: 14,
     paddingHorizontal: 16,
   },
-  promptButtonLabel: { color: '#fff', fontWeight: '600' },
-  promptDismiss: { color: palette.textMuted, textAlign: 'center', fontSize: 13 },
-  card: {
-    backgroundColor: palette.card,
-    borderRadius: 16,
-    padding: 16,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: palette.border,
-  },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: palette.text },
-  cardLine: { fontSize: 13, color: palette.textMuted },
-  manualButton: {
-    borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  manualButtonLabel: { fontSize: 15, fontWeight: '600', color: palette.primary },
-  clearButton: { borderColor: palette.danger },
+  locationButtonLabel: { fontSize: 16, fontWeight: '600', color: palette.text },
+  locationButtonChevron: { fontSize: 20, color: palette.textMuted },
 });
