@@ -142,15 +142,23 @@ export async function clearMyPresence(doctorId: string) {
   if (error) throw error;
 }
 
-export async function manualCheckIn(doctorId: string, locationId: string) {
-  await clearMyPresence(doctorId);
-  const { error } = await supabase.from('presence').insert({
-    doctor_id: doctorId,
-    location_id: locationId,
-    status: 'present',
-    source: 'manual',
+/**
+ * Manual check-in via RPC: records the GPS anchor (when available), teaches
+ * the place its coordinates, and returns the configured checkout radius so
+ * the caller can arm the geofence.
+ */
+export async function manualCheckIn(
+  locationId: string,
+  coords: { lat: number; lng: number } | null
+) {
+  const { data, error } = await supabase.rpc('manual_check_in', {
+    p_location_id: locationId,
+    p_lat: coords?.lat ?? null,
+    p_lng: coords?.lng ?? null,
   });
   if (error) throw error;
+  if (data?.error) throw new Error(RPC_ERRORS[data.error] ?? data.error);
+  return data as { ok: true; presence_id: string; radius_meters: number };
 }
 
 export async function fetchBoard(myProfileId: string): Promise<BoardDoctor[]> {

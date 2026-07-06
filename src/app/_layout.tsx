@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import '@/lib/geofence'; // registers the GPS-checkout background task at startup
 
 SplashScreen.preventAutoHideAsync();
 

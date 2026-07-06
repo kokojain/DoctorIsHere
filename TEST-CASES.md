@@ -140,6 +140,15 @@ Prefixes: **AU** auth (both apps) · **BD** backend dashboard · **DA** doctor a
 | DA-28 | Replace-puck guards | (a) scan an expired/retired puck (b) scan a puck attached to another place (c) scan the place's own current puck | (a) "expired" error (b) "already registered" error (c) friendly no-op "already attached" |
 | DA-29 | Camera permission denied | Deny camera on first scan | Explanatory screen with an Allow button; no crash; radio-detect provisioning still available |
 
+### 3.6 GPS checkout (manual check-ins)
+
+| ID | Case | Steps | Expected |
+|---|---|---|---|
+| DA-30 | GPS anchor on manual check-in | Manual check-in with location permission granted | Presence stores anchor coords; the place learns lat/lng on its first fix; geofence armed with the server-configured radius (default 500 m) |
+| DA-31 | Auto checkout on leaving | While manually checked in, travel > radius away (app backgrounded) | Geofence exit fires; presence closes; doctor gets "Checked out" notification; patient board flips to Away |
+| DA-32 | Geofence disarmed correctly | (a) tap Check out manually (b) beacon arrival replaces the manual presence | Fence stopped in both cases; no phantom checkout later |
+| DA-33 | No GPS available | Manual check-in with location denied | Check-in still works (no anchor, no fence); presence closes only via manual checkout |
+
 ---
 
 ## 4. PA — Patient app

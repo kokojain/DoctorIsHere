@@ -15,6 +15,11 @@ import { DurationSheet } from '@/components/duration-sheet';
 import { useAuth } from '@/lib/auth-context';
 import { useBeacon } from '@/lib/beacon-context';
 import {
+  getCurrentCoords,
+  startManualCheckoutFence,
+  stopManualCheckoutFence,
+} from '@/lib/geofence';
+import {
   clearMyPresence,
   fetchMyLocations,
   fetchMyOpenPresence,
@@ -63,6 +68,13 @@ export default function MyPresenceScreen() {
   useEffect(() => {
     if (needsPrompt) setSheetOpen(true);
   }, [needsPrompt]);
+
+  // The GPS checkout fence only guards an open MANUAL presence.
+  useEffect(() => {
+    if (!presence || presence.source !== 'manual') {
+      stopManualCheckoutFence().catch(() => {});
+    }
+  }, [presence]);
 
   if (!doctor || presenceQuery.isLoading) {
     return (
@@ -159,7 +171,20 @@ export default function MyPresenceScreen() {
               key={location.id}
               style={styles.locationButton}
               disabled={busy}
-              onPress={() => run(() => manualCheckIn(doctor.id, location.id))}>
+              onPress={() =>
+                run(async () => {
+                  const coords = await getCurrentCoords();
+                  const result = await manualCheckIn(location.id, coords);
+                  if (coords) {
+                    // Leaving the radius auto-checks-out (server-configured, default 500 m).
+                    await startManualCheckoutFence(
+                      coords.lat,
+                      coords.lng,
+                      result.radius_meters
+                    ).catch(() => {});
+                  }
+                })
+              }>
               <Text style={styles.locationButtonLabel}>{location.name}</Text>
               <Text style={styles.locationButtonChevron}>›</Text>
             </Pressable>
