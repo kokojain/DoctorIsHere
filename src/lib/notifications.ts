@@ -12,6 +12,17 @@ Notifications.setNotificationHandler({
 });
 
 /**
+ * Asks for notification permission (used for the doctor's local "you've
+ * arrived" buzz — no push servers involved, works on free Apple accounts).
+ */
+export async function ensureNotificationPermission(): Promise<boolean> {
+  const { status: existing } = await Notifications.getPermissionsAsync();
+  if (existing === 'granted') return true;
+  const { status } = await Notifications.requestPermissionsAsync();
+  return status === 'granted';
+}
+
+/**
  * Returns an Expo push token, or null when push isn't possible (simulator,
  * permission denied, or `eas init` not yet run). The live board works without
  * push — this must never block the app.

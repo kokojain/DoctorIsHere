@@ -1,5 +1,7 @@
 import CoreLocation
 import ExpoModulesCore
+import UIKit
+import UserNotifications
 
 internal final class InvalidUuidException: GenericException<String> {
   override var reason: String {
@@ -156,6 +158,28 @@ final class BeaconLocationManager: NSObject, CLLocationManagerDelegate {
 
   func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
     onRegionChange?(["event": "enter", "identifier": region.identifier])
+    postArrivalNotificationIfBackgrounded()
+  }
+
+  /// Region entry with the app backgrounded (or relaunched by iOS) → buzz the
+  /// doctor with a local notification; tapping it foregrounds the app, where
+  /// the duration sheet takes over. Foreground arrivals skip this — the sheet
+  /// itself appears. Local notifications need no push entitlement.
+  private func postArrivalNotificationIfBackgrounded() {
+    DispatchQueue.main.async {
+      guard UIApplication.shared.applicationState != .active else { return }
+      let content = UNMutableNotificationContent()
+      content.title = "You’ve arrived"
+      content.body = "Your clinic beacon was detected — tap to set how long you’ll be here."
+      content.sound = .default
+      content.interruptionLevel = .timeSensitive
+      let request = UNNotificationRequest(
+        identifier: "beacon-arrival",
+        content: content,
+        trigger: nil
+      )
+      UNUserNotificationCenter.current().add(request)
+    }
   }
 
   func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {

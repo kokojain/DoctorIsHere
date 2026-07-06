@@ -1,6 +1,7 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
 
 import { useAuth } from './auth-context';
+import { ensureNotificationPermission } from './notifications';
 import { useBeaconPresence, type BeaconPresenceState } from './use-beacon-presence';
 
 const BeaconContext = createContext<BeaconPresenceState>({
@@ -16,6 +17,13 @@ const BeaconContext = createContext<BeaconPresenceState>({
 export function BeaconProvider({ children }: { children: ReactNode }) {
   const { doctor } = useAuth();
   const state = useBeaconPresence(!!doctor);
+
+  // The native module posts a local "you've arrived" notification on region
+  // entry while backgrounded — that needs notification permission up front.
+  useEffect(() => {
+    if (doctor) ensureNotificationPermission();
+  }, [doctor]);
+
   return <BeaconContext.Provider value={state}>{children}</BeaconContext.Provider>;
 }
 
