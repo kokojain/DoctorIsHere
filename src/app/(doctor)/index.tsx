@@ -18,8 +18,8 @@ import {
   setExpectedUntil,
   subscribeToPresence,
 } from '@/lib/presence-api';
+import { useBeacon } from '@/lib/beacon-context';
 import { palette, formatTime } from '@/lib/ui';
-import { useBeaconPresence } from '@/lib/use-beacon-presence';
 
 const DURATION_CHOICES = [
   { label: '30 min', minutes: 30 },
@@ -30,7 +30,7 @@ const DURATION_CHOICES = [
 export default function MyPresenceScreen() {
   const { doctor } = useAuth();
   const queryClient = useQueryClient();
-  const beacon = useBeaconPresence(!!doctor);
+  const beacon = useBeacon();
   const [dismissedPromptFor, setDismissedPromptFor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 

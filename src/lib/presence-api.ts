@@ -36,13 +36,67 @@ export interface BeaconSighting {
   minor: number;
 }
 
-/** Reports a beacon arrival or heartbeat sighting to the backend. */
+/**
+ * Reports a beacon arrival or heartbeat sighting. Server-side validation
+ * (catalog, expiry, anti-spoof, duration cool-off) lives in the
+ * report_beacon Postgres function — see supabase/migrations/0002.
+ */
 export async function reportBeacon(kind: 'arrival' | 'sighting', beacon: BeaconSighting) {
-  const { data, error } = await supabase.functions.invoke('report-arrival', {
-    body: { kind, uuid: beacon.uuid, major: beacon.major, minor: beacon.minor },
+  const { data, error } = await supabase.rpc('report_beacon', {
+    p_uuid: beacon.uuid,
+    p_major: beacon.major,
+    p_minor: beacon.minor,
+    p_kind: kind,
   });
   if (error) throw error;
-  return data as { presence?: Presence; ignored?: string };
+  return data as { ok?: boolean; heartbeat?: boolean; ignored?: string; error?: string };
+}
+
+export interface MyPlace extends ClinicLocation {
+  beacon: { label: string | null; last_seen_at: string | null; active: boolean } | null;
+}
+
+export async function fetchMyPlaces(doctorId: string): Promise<MyPlace[]> {
+  const { data, error } = await supabase
+    .from('locations')
+    .select('id, doctor_id, name, address, beacons(label, last_seen_at, active)')
+    .eq('doctor_id', doctorId)
+    .order('name');
+  if (error) throw error;
+  return (data ?? []).map((row) => {
+    const { beacons, ...location } = row as ClinicLocation & {
+      beacons: { label: string | null; last_seen_at: string | null; active: boolean }[] | null;
+    };
+    return { ...location, beacon: beacons?.[0] ?? null };
+  });
+}
+
+const RPC_ERRORS: Record<string, string> = {
+  not_a_doctor: 'Only doctor accounts can register beacons.',
+  name_required: 'Give this place a name first.',
+  unknown_beacon: 'This is not a DoctorIsHere beacon (not in the catalog).',
+  expired_beacon: 'This beacon has expired — order a replacement puck.',
+  already_registered: 'This beacon is already registered to a place.',
+  not_found: 'Place not found.',
+};
+
+export async function registerPlace(beacon: BeaconSighting, name: string, address?: string) {
+  const { data, error } = await supabase.rpc('register_place', {
+    p_uuid: beacon.uuid,
+    p_major: beacon.major,
+    p_minor: beacon.minor,
+    p_name: name,
+    p_address: address ?? null,
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(RPC_ERRORS[data.error] ?? data.error);
+  return data as { ok: true; location_id: string };
+}
+
+export async function removePlace(locationId: string) {
+  const { data, error } = await supabase.rpc('remove_place', { p_location_id: locationId });
+  if (error) throw error;
+  if (data?.error) throw new Error(RPC_ERRORS[data.error] ?? data.error);
 }
 
 export async function setExpectedUntil(presenceId: string, minutes: number | null) {

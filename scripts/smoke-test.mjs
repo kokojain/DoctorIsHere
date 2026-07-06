@@ -106,6 +106,51 @@ const gotEvent = await new Promise((resolve) => {
 });
 check('realtime presence event received', gotEvent);
 
+// 9. Beacon RPC: arrival via report_beacon (the physical-phone path)
+const DEMO_UUID = (process.env.EXPO_PUBLIC_BEACON_UUID ?? '2F234454-CF6D-4A0F-ADF2-F4911BA9FFA6').toLowerCase();
+await doctorClient.from('presence').update({ ended_at: new Date().toISOString() })
+  .eq('doctor_id', doctorRow.id).is('ended_at', null);
+// Test 7 closed a presence by timer expiry; null it out so the (correct)
+// duration cool-off rule doesn't block this arrival test.
+await admin.from('presence').update({ expected_until: null })
+  .eq('doctor_id', doctorRow.id).not('ended_at', 'is', null);
+const { data: arrival } = await doctorClient.rpc('report_beacon', {
+  p_uuid: DEMO_UUID, p_major: 1, p_minor: 1, p_kind: 'arrival',
+});
+check('report_beacon arrival opens presence', arrival?.ok === true, JSON.stringify(arrival));
+
+// 10. Same beacon again → heartbeat, not a new presence
+const { data: hb } = await doctorClient.rpc('report_beacon', {
+  p_uuid: DEMO_UUID, p_major: 1, p_minor: 1, p_kind: 'sighting',
+});
+check('report_beacon heartbeat', hb?.heartbeat === true, JSON.stringify(hb));
+
+// 11. Spoof: patient reporting the doctor's beacon is ignored
+const { data: spoof } = await patientClient.rpc('report_beacon', {
+  p_uuid: DEMO_UUID, p_major: 1, p_minor: 1, p_kind: 'arrival',
+});
+check('spoofed report rejected', spoof?.ignored === 'not_your_beacon', JSON.stringify(spoof));
+
+// 12. Unknown beacon identity ignored
+const { data: unknown } = await doctorClient.rpc('report_beacon', {
+  p_uuid: DEMO_UUID, p_major: 1, p_minor: 99, p_kind: 'arrival',
+});
+check('unknown beacon ignored', unknown?.ignored === 'unknown_beacon');
+
+// 13. register_place provisions a new location on a cataloged puck (minor 2)
+const { data: reg } = await doctorClient.rpc('register_place', {
+  p_uuid: DEMO_UUID, p_major: 1, p_minor: 2, p_name: 'Smoke Test Room', p_address: null,
+});
+check('register_place works', reg?.ok === true, JSON.stringify(reg));
+const { data: reg2 } = await doctorClient.rpc('register_place', {
+  p_uuid: DEMO_UUID, p_major: 1, p_minor: 2, p_name: 'Dup', p_address: null,
+});
+check('double-register rejected', reg2?.error === 'already_registered');
+if (reg?.location_id) {
+  const { data: rem } = await doctorClient.rpc('remove_place', { p_location_id: reg.location_id });
+  check('remove_place works', rem?.ok === true);
+}
+
 // Cleanup: close any open presence so the demo starts from Away.
 await doctorClient.from('presence').update({ ended_at: new Date().toISOString() })
   .eq('doctor_id', doctorRow.id).is('ended_at', null);
