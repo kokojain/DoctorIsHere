@@ -31,6 +31,17 @@ export default function SignInScreen() {
     // Success needs no navigation here — the root layout redirects by role.
   }
 
+  async function quickSignIn(demoEmail: string, demoPassword: string) {
+    setBusy(true);
+    setError(null);
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: demoEmail,
+      password: demoPassword,
+    });
+    if (signInError) setError(signInError.message);
+    setBusy(false);
+  }
+
   return (
     <KeyboardAvoidingView
       style={styles.screen}
@@ -71,10 +82,22 @@ export default function SignInScreen() {
           )}
         </Pressable>
 
-        <Text style={styles.hint}>
-          Demo accounts: doctor@demo.doctorishere.app / patient@demo.doctorishere.app
-          (password: see seed script)
-        </Text>
+        {__DEV__ && (
+          <View style={styles.demoRow}>
+            <Pressable
+              style={styles.demoButton}
+              disabled={busy}
+              onPress={() => quickSignIn('doctor@demo.doctorishere.app', 'DoctorDemo!234')}>
+              <Text style={styles.demoButtonLabel}>Demo: Doctor</Text>
+            </Pressable>
+            <Pressable
+              style={styles.demoButton}
+              disabled={busy}
+              onPress={() => quickSignIn('patient@demo.doctorishere.app', 'PatientDemo!234')}>
+              <Text style={styles.demoButtonLabel}>Demo: Patient</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -136,10 +159,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  hint: {
-    fontSize: 12,
-    color: palette.textMuted,
-    textAlign: 'center',
+  demoRow: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
     marginTop: 8,
+  },
+  demoButton: {
+    borderWidth: 1,
+    borderColor: palette.primary,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  demoButtonLabel: {
+    color: palette.primary,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
