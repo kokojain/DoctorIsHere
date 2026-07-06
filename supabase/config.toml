@@ -1,0 +1,7 @@
+project_id = "doctorishere"
+
+[functions.report-arrival]
+verify_jwt = true
+
+[functions.presence-sweeper]
+verify_jwt = true
